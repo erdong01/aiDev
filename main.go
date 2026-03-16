@@ -19,29 +19,35 @@ func main() {
 	})
 	db.InitMySQL("root:Tm@587973@tcp(47.100.85.27:3306)/ai_dev?charset=utf8mb4&parseTime=True&loc=Local")
 	router.POST("/v1/volcengine/callback", func(c *gin.Context) {
-		// 1. 读取原始 Body (最通用)
+		// 1. 获取令牌 (从 APISIX 转发的 Authorization header)
+		authHeader := c.GetHeader("Authorization")
+		consumerName := c.GetHeader("X-Consumer-Name")
+
+		// 2. 读取原始 Body
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
+			log.Printf("读取 Body 失败: %v", err)
+			c.Status(400)
 			return
 		}
 
-		// 2. 解析成 Map 或者结构体
+		// 3. 解析 JSON
 		var respMap map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &respMap); err != nil {
 			log.Printf("解析 JSON 失败: %v", err)
+			c.Status(400)
 			return
 		}
 
-		// 3. 提取 task_id (根据火山的实际返回路径提取)
+		// 4. 提取 task_id，写入 key
 		// 假设结构是 {"data": {"task_id": "xxx"}}
 		if data, ok := respMap["data"].(map[string]interface{}); ok {
 			if taskID, ok := data["task_id"].(string); ok {
-				// 4. 使用 GORM 存入 MySQL
 				db.DB.Create(&model.AiTask{
 					GenerateTaskId: taskID,
-					// RawResponse:    string(bodyBytes), // 甚至可以存下原始响应备查
+					Key:            authHeader, // 将令牌写入 key 字段
 				})
-				log.Printf("成功保存任务 ID: %s", taskID)
+				log.Printf("成功保存任务 ID: %s, Consumer: %s", taskID, consumerName)
 			}
 		}
 
