@@ -9,6 +9,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
 )
 
 var DB *gorm.DB
@@ -16,6 +17,7 @@ var DB *gorm.DB
 // InitMySQL 初始化 MySQL 连接
 // dsn 格式: user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local
 func InitMySQL(dsn string) {
+	fmt.Println("dsn:", dsn)
 	var err error
 
 	// 自定义 logger
@@ -31,6 +33,9 @@ func InitMySQL(dsn string) {
 
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: newLogger,
+		NamingStrategy: schema.NamingStrategy{
+			TablePrefix: "pq_",
+		},
 	})
 	if err != nil {
 		panic(fmt.Sprintf("连接 MySQL 失败: %v", err))

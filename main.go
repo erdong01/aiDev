@@ -4,8 +4,11 @@ import (
 	"aiDev/lib/db"
 	"aiDev/model"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,40 +20,105 @@ func main() {
 			"message": "pong",
 		})
 	})
-	db.InitMySQL("root:Tm@587973@tcp(47.100.85.27:3306)/ai_dev?charset=utf8mb4&parseTime=True&loc=Local")
-	router.POST("/v1/volcengine/callback", func(c *gin.Context) {
-		// 1. 获取令牌 (从 APISIX 转发的 Authorization header)
-		authHeader := c.GetHeader("Authorization")
-		consumerName := c.GetHeader("X-Consumer-Name")
 
-		// 2. 读取原始 Body
+	// 从环境变量构建 DSN
+	dbUser := os.Getenv("MYSQL_USER")
+	dbPass := os.Getenv("MYSQL_PASS")
+	dbHost := os.Getenv("MYSQL_HOST")
+	dbPort := os.Getenv("MYSQL_PORT")
+	dbName := os.Getenv("MYSQL_DB")
+
+	if dbUser == "" {
+		dbUser = "root"
+	}
+	if dbHost == "" {
+		dbHost = "127.0.0.1"
+	}
+	if dbPort == "" {
+		dbPort = "3306"
+	}
+	if dbName == "" {
+		dbName = "ai_dev"
+	}
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		dbUser, dbPass, dbHost, dbPort, dbName)
+	db.InitMySQL(dsn)
+	// 1. 定义单对象的结构体 (去掉了外层的数组)
+	type ApisixLog struct {
+		Request struct {
+			Headers map[string]string `json:"headers"`
+		} `json:"request"`
+		Response struct {
+			Status int    `json:"status"`
+			Body   string `json:"body"`
+		} `json:"response"`
+		Consumer struct {
+			Username string `json:"username"`
+		} `json:"consumer"`
+	}
+
+	router.POST("/v1/volcengine/callback", func(c *gin.Context) {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			log.Printf("读取 Body 失败: %v", err)
 			c.Status(400)
 			return
 		}
 
-		// 3. 解析 JSON
+		// 2. 解析为单对象 (不再是数组)
+		var logItem ApisixLog
+		if err := json.Unmarshal(bodyBytes, &logItem); err != nil {
+			log.Printf("解析 APISIX Log 失败: %v", err)
+			c.Status(400) // 这里可以返回 200 避免 APISIX 一直重试，但 400 方便我们看错
+			return
+		}
+
+		// 如果响应不是 200 或者没有 Body，直接忽略
+		if logItem.Response.Status != 200 || logItem.Response.Body == "" {
+			c.Status(200)
+			return
+		}
+
+		// 3. 解析火山引擎的响应体 (这里的 Body 是内嵌的 JSON 字符串)
 		var respMap map[string]interface{}
-		if err := json.Unmarshal(bodyBytes, &respMap); err != nil {
-			log.Printf("解析 JSON 失败: %v", err)
-			c.Status(400)
+		if err := json.Unmarshal([]byte(logItem.Response.Body), &respMap); err != nil {
+			log.Printf("解析火山引擎 Body 失败: %v", err)
+			c.Status(200)
 			return
 		}
 
-		// 4. 提取 task_id，写入 key
-		// 假设结构是 {"data": {"task_id": "xxx"}}
-		if data, ok := respMap["data"].(map[string]interface{}); ok {
-			if taskID, ok := data["task_id"].(string); ok {
-				db.DB.Create(&model.AiTask{
-					GenerateTaskId: taskID,
-					Key:            authHeader, // 将令牌写入 key 字段
-				})
-				log.Printf("成功保存任务 ID: %s, Consumer: %s", taskID, consumerName)
+		// 4. 精准提取任务 ID (根据你的日志，现在的 key 是 "id")
+		var taskID string
+		if id, ok := respMap["id"].(string); ok {
+			taskID = id
+		} else if data, ok := respMap["data"].(map[string]interface{}); ok {
+			// 保留一个向下兼容的逻辑，万一以后火山又变回 data 结构了
+			if tid, ok := data["task_id"].(string); ok {
+				taskID = tid
 			}
 		}
 
+		// 5. 完美入库
+		if taskID != "" {
+			authHeader := logItem.Request.Headers["authorization"]
+			pureKey := strings.TrimPrefix(authHeader, "Bearer ")
+			consumerName := logItem.Consumer.Username
+
+			err := db.DB.Create(&model.AiTask{
+				GenerateTaskId: taskID,
+				Key:            pureKey,
+			}).Error
+
+			if err != nil {
+				log.Printf("入库失败: %v", err)
+			} else {
+				log.Printf("✅ 任务完美入库: ID=%s, 用户=%s", taskID, consumerName)
+			}
+		} else {
+			log.Printf("未找到任务 ID，原始 Body: %s", logItem.Response.Body)
+		}
+
+		// 无论业务逻辑如何，只要格式对了，就给 APISIX 返回 200，告诉它“我收到了，不用再重试了”
 		c.Status(200)
 	})
 	router.Run() // listens on 0.0.0.0:8080 by default

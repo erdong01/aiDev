@@ -10,7 +10,7 @@ import (
 // AiTask  AI 任务表。
 
 type AiTask struct {
-	Id               *int64          `gorm:"column:primaryKey;id" json:"Id"`                   //type:*int64            comment:                                                   version:2026-02-15 21:40
+	Id               *int64          `gorm:"column:id;primaryKey" json:"Id"`                   //type:*int64            comment:                                                   version:2026-02-15 21:40
 	CreatedAt        *time.Time      `gorm:"column:created_at" json:"CreatedAt"`               //type:*time.Time        comment:创建时间                                           version:2026-02-15 21:40
 	UpdatedAt        *time.Time      `gorm:"column:updated_at" json:"UpdatedAt"`               //type:*time.Time        comment:更新时间                                           version:2026-02-15 21:40
 	DeletedAt        *gorm.DeletedAt `gorm:"column:deleted_at" json:"DeletedAt"`               //type:*gorm.DeletedAt   comment:                                                   version:2026-02-15 21:40
@@ -29,5 +29,5 @@ type AiTask struct {
 // TableName 表名:ai_task，AI 任务表。
 // 说明:
 func (*AiTask) TableName() string {
-	return "ai_task"
+	return "pq_ai_task"
 }
