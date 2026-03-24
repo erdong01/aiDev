@@ -3,6 +3,9 @@ package main
 import (
 	"aiDev/lib/db"
 	"aiDev/model"
+	"bytes"
+	"compress/gzip"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,6 +80,25 @@ func main() {
 		return json.RawMessage(encoded)
 	}
 
+	decodeUpstreamResponseBody := func(raw string) ([]byte, error) {
+		payload := []byte(raw)
+		if len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b {
+			reader, err := gzip.NewReader(bytes.NewReader(payload))
+			if err != nil {
+				return nil, err
+			}
+			defer reader.Close()
+
+			decoded, err := io.ReadAll(reader)
+			if err != nil {
+				return nil, err
+			}
+			return decoded, nil
+		}
+
+		return payload, nil
+	}
+
 	router.POST("/v1/volcengine/callback", func(c *gin.Context) {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -98,10 +120,21 @@ func main() {
 			return
 		}
 
+		decodedRespBody, err := decodeUpstreamResponseBody(logItem.Response.Body)
+		if err != nil {
+			log.Printf("解压火山引擎 Body 失败: %v", err)
+			c.Status(200)
+			return
+		}
+
 		// 3. 解析火山引擎的响应体 (这里的 Body 是内嵌的 JSON 字符串)
 		var respMap map[string]interface{}
-		if err := json.Unmarshal([]byte(logItem.Response.Body), &respMap); err != nil {
-			log.Printf("解析火山引擎 Body 失败: %v", err)
+		if err := json.Unmarshal(decodedRespBody, &respMap); err != nil {
+			prefix := decodedRespBody
+			if len(prefix) > 16 {
+				prefix = prefix[:16]
+			}
+			log.Printf("解析火山引擎 Body 失败: %v, body_prefix_hex=%s", err, hex.EncodeToString(prefix))
 			c.Status(200)
 			return
 		}
@@ -136,7 +169,7 @@ func main() {
 				if aiTask.Id != nil {
 					logEntry := model.PqAiTaskLog{
 						RequestParams: datatypes.JSON(normalizeJSONPayload(logItem.Request.Body)),
-						ResponseData:  datatypes.JSON(normalizeJSONPayload([]byte(logItem.Response.Body))),
+						ResponseData:  datatypes.JSON(normalizeJSONPayload(decodedRespBody)),
 						AiTaskId:      *aiTask.Id,
 					}
 
@@ -150,7 +183,7 @@ func main() {
 				log.Printf("✅ 任务完美入库: ID=%s, 用户=%s", taskID, consumerName)
 			}
 		} else {
-			log.Printf("未找到任务 ID，原始 Body: %s", logItem.Response.Body)
+			log.Printf("未找到任务 ID，原始 Body: %s", string(decodedRespBody))
 		}
 
 		// 无论业务逻辑如何，只要格式对了，就给 APISIX 返回 200，告诉它“我收到了，不用再重试了”

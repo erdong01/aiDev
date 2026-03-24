@@ -1,9 +1,12 @@
-docker build --platform linux/amd64 -t registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.11 .
+docker build --platform linux/amd64 -t registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.15 .
 
-docker push registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.12
+docker push registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.15
 
-docker pull registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.12
+docker pull registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.15
 
 docker stop aidev
 
 docker rm aidev
+
+
+docker  logs ai_build-apisix-1 --tail 200
