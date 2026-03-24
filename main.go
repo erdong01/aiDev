@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/datatypes"
 )
 
 func main() {
@@ -48,6 +49,7 @@ func main() {
 	type ApisixLog struct {
 		Request struct {
 			Headers map[string]string `json:"headers"`
+			Body    json.RawMessage   `json:"body"`
 		} `json:"request"`
 		Response struct {
 			Status int    `json:"status"`
@@ -56,6 +58,23 @@ func main() {
 		Consumer struct {
 			Username string `json:"username"`
 		} `json:"consumer"`
+	}
+
+	normalizeJSONPayload := func(raw []byte) json.RawMessage {
+		trimmed := strings.TrimSpace(string(raw))
+		if trimmed == "" {
+			return json.RawMessage([]byte("null"))
+		}
+
+		if json.Valid([]byte(trimmed)) {
+			return json.RawMessage([]byte(trimmed))
+		}
+
+		encoded, err := json.Marshal(trimmed)
+		if err != nil {
+			return json.RawMessage([]byte("null"))
+		}
+		return json.RawMessage(encoded)
 	}
 
 	router.POST("/v1/volcengine/callback", func(c *gin.Context) {
@@ -104,14 +123,30 @@ func main() {
 			pureKey := strings.TrimPrefix(authHeader, "Bearer ")
 			consumerName := logItem.Consumer.Username
 
-			err := db.DB.Create(&model.AiTask{
+			aiTask := model.AiTask{
 				GenerateTaskId: taskID,
 				Key:            pureKey,
-			}).Error
+			}
+
+			err := db.DB.Create(&aiTask).Error
 
 			if err != nil {
 				log.Printf("入库失败: %v", err)
 			} else {
+				if aiTask.Id != nil {
+					logEntry := model.PqAiTaskLog{
+						RequestParams: datatypes.JSON(normalizeJSONPayload(logItem.Request.Body)),
+						ResponseData:  datatypes.JSON(normalizeJSONPayload([]byte(logItem.Response.Body))),
+						AiTaskId:      *aiTask.Id,
+					}
+
+					if err := db.DB.Create(&logEntry).Error; err != nil {
+						log.Printf("任务日志入库失败: taskID=%s, err=%v", taskID, err)
+					}
+				} else {
+					log.Printf("任务日志未写入: taskID=%s, 原因=AiTask 主键为空", taskID)
+				}
+
 				log.Printf("✅ 任务完美入库: ID=%s, 用户=%s", taskID, consumerName)
 			}
 		} else {
