@@ -30,7 +30,7 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
 
             local function sync_task_to_go()
                 local httpc = http.new()
-                httpc:set_timeout(5000) -- 5秒超时
+                httpc:set_timeout(20000) -- 5秒超时
                 local callback_body = core.json.encode({
                     request = {
                         headers = {
