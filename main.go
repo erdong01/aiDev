@@ -3,8 +3,6 @@ package main
 import (
 	"aiDev/lib/db"
 	"aiDev/model"
-	"bytes"
-	"compress/gzip"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -51,52 +49,18 @@ func main() {
 	// 1. 定义单对象的结构体 (去掉了外层的数组)
 	type ApisixLog struct {
 		Request struct {
-			Headers map[string]string `json:"headers"`
-			Body    json.RawMessage   `json:"body"`
+			Headers    map[string]string `json:"headers"`
+			Body       json.RawMessage   `json:"body"`
+			BodyBase64 bool              `json:"body_base64"`
 		} `json:"request"`
 		Response struct {
-			Status int    `json:"status"`
-			Body   string `json:"body"`
+			Status     int    `json:"status"`
+			Body       string `json:"body"`
+			BodyBase64 bool   `json:"body_base64"`
 		} `json:"response"`
 		Consumer struct {
 			Username string `json:"username"`
 		} `json:"consumer"`
-	}
-
-	normalizeJSONPayload := func(raw []byte) json.RawMessage {
-		trimmed := strings.TrimSpace(string(raw))
-		if trimmed == "" {
-			return json.RawMessage([]byte("null"))
-		}
-
-		if json.Valid([]byte(trimmed)) {
-			return json.RawMessage([]byte(trimmed))
-		}
-
-		encoded, err := json.Marshal(trimmed)
-		if err != nil {
-			return json.RawMessage([]byte("null"))
-		}
-		return json.RawMessage(encoded)
-	}
-
-	decodeUpstreamResponseBody := func(raw string) ([]byte, error) {
-		payload := []byte(raw)
-		if len(payload) >= 2 && payload[0] == 0x1f && payload[1] == 0x8b {
-			reader, err := gzip.NewReader(bytes.NewReader(payload))
-			if err != nil {
-				return nil, err
-			}
-			defer reader.Close()
-
-			decoded, err := io.ReadAll(reader)
-			if err != nil {
-				return nil, err
-			}
-			return decoded, nil
-		}
-
-		return payload, nil
 	}
 
 	router.POST("/v1/volcengine/callback", func(c *gin.Context) {
@@ -120,9 +84,16 @@ func main() {
 			return
 		}
 
-		decodedRespBody, err := decodeUpstreamResponseBody(logItem.Response.Body)
+		decodedRespBody, err := decodeUpstreamResponseBody(logItem.Response.Body, logItem.Response.BodyBase64)
 		if err != nil {
 			log.Printf("解压火山引擎 Body 失败: %v", err)
+			c.Status(200)
+			return
+		}
+
+		decodedReqBody, err := decodeRequestPayload(logItem.Request.Body, logItem.Request.BodyBase64)
+		if err != nil {
+			log.Printf("解析请求 Body 失败: %v", err)
 			c.Status(200)
 			return
 		}
@@ -168,7 +139,7 @@ func main() {
 			} else {
 				if aiTask.Id != nil {
 					logEntry := model.PqAiTaskLog{
-						RequestParams: datatypes.JSON(normalizeJSONPayload(logItem.Request.Body)),
+						RequestParams: datatypes.JSON(normalizeJSONPayload(decodedReqBody)),
 						ResponseData:  datatypes.JSON(normalizeJSONPayload(decodedRespBody)),
 						AiTaskId:      *aiTask.Id,
 					}

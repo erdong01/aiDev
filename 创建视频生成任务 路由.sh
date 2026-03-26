@@ -16,13 +16,69 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
       }
     },
     "serverless-pre-function": {
-      "phase": "access",
+      "phase": "rewrite",
       "functions": [
         "return function(conf, ctx)
             local core = require(\"apisix.core\")
+            local function preview_payload(value, limit)
+                if not value then
+                    return \"nil\"
+                end
 
-            -- 在请求阶段把后面要用的数据缓存到 ctx，避免在响应阶段拿不到。
-            ctx.cached_req_body = core.request.get_body() or \"\"
+                local preview = value
+                if #preview > limit then
+                    preview = string.sub(preview, 1, limit) .. \"...(truncated)\"
+                end
+
+                preview = string.gsub(preview, \"[\\r\\n\\t]\", \" \")
+                return preview
+            end
+
+            local headers = ngx.req.get_headers()
+            core.log.warn(
+                \"[aidev-video-debug] rewrite 进入, content_type=\",
+                headers[\"content-type\"] or \"nil\",
+                \", content_length=\",
+                headers[\"content-length\"] or \"nil\",
+                \", transfer_encoding=\",
+                headers[\"transfer-encoding\"] or \"nil\"
+            )
+
+            -- 在请求阶段一次性读取并缓存原始 body，后续阶段不再调用 req API。
+            ngx.req.read_body()
+
+            local req_body = ngx.req.get_body_data()
+            if not req_body then
+                local body_file = ngx.req.get_body_file()
+                if body_file then
+                    core.log.warn(\"[aidev-video-debug] rewrite 请求体落盘, body_file=\", body_file)
+                    local file = io.open(body_file, \"rb\")
+                    if file then
+                        req_body = file:read(\"*a\")
+                        file:close()
+                    end
+                end
+            end
+
+            if not req_body or req_body == \"\" then
+                core.log.warn(\"[aidev-video-debug] rewrite 阶段未拿到原始请求体，回退为 {}\")
+                req_body = \"{}\"
+            end
+
+            ctx.cached_req_body = ngx.encode_base64(req_body)
+            ctx.cached_req_body_base64 = true
+
+            core.log.warn(
+                \"[aidev-video-debug] rewrite 请求体已缓存, len=\",
+                #req_body,
+                \", cached_len=\",
+                #ctx.cached_req_body,
+                \", req_body_base64=\",
+                tostring(ctx.cached_req_body_base64),
+                \", preview=\",
+                preview_payload(req_body, 600)
+            )
+
             ctx.cached_authorization = ngx.var.http_authorization
             ctx.cached_consumer_name = ctx.consumer_name or \"unknown\"
         end"
@@ -34,6 +90,19 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
         "return function(conf, ctx)
             local core = require(\"apisix.core\")
             local http = require(\"resty.http\")
+            local function preview_payload(value, limit)
+                if not value then
+                    return \"nil\"
+                end
+
+                local preview = value
+                if #preview > limit then
+                    preview = string.sub(preview, 1, limit) .. \"...(truncated)\"
+                end
+
+                preview = string.gsub(preview, \"[\\r\\n\\t]\", \" \")
+                return preview
+            end
 
             local chunk = ngx.arg[1]
             local eof = ngx.arg[2]
@@ -51,10 +120,25 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
                 return
             end
 
-            local req_body = ctx.cached_req_body or \"\"
+            local req_body = ctx.cached_req_body or ngx.encode_base64(\"{}\")
+            local req_body_base64 = ctx.cached_req_body_base64 == true
+
             local volc_key = ctx.cached_authorization
             local consumer_name = ctx.cached_consumer_name or \"unknown\"
             local response_status = ngx.status
+
+            core.log.warn(
+                \"[aidev-video-debug] body_filter 准备回调, status=\",
+                response_status,
+                \", req_body_base64=\",
+                tostring(req_body_base64),
+                \", req_body_len=\",
+                #req_body,
+                \", req_body_preview=\",
+                preview_payload(req_body, 240),
+                \", resp_body_len=\",
+                #resp_body
+            )
 
             local function sync_task_to_go()
                 local httpc = http.new()
@@ -64,11 +148,13 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
                         headers = {
                             authorization = volc_key
                         },
-                        body = req_body
+                        body = req_body,
+                        body_base64 = req_body_base64
                     },
                     response = {
                         status = response_status,
-                        body = resp_body
+                        body = ngx.encode_base64(resp_body),
+                        body_base64 = true
                     },
                     consumer = {
                         username = consumer_name
