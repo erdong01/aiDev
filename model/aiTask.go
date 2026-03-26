@@ -23,7 +23,7 @@ type AiTask struct {
 	CompletionTokens *int            `gorm:"column:completion_tokens" json:"CompletionTokens"` //type:*int              comment:输出视频花费的 token 数                            version:2026-02-15 21:40
 	TotalTokens      *int            `gorm:"column:total_tokens" json:"TotalTokens"`           //type:*int              comment:本次请求消耗的总 token 数                          version:2026-02-15 21:40
 	Key              string          `gorm:"column:key" json:"Key"`                            //type:string            comment:                                                   version:2026-02-16 20:08
-	PqAiTaskLog      PqAiTaskLog     `gorm:"column:key" json:"Key"`
+	PqAiTaskLog      PqAiTaskLog     `gorm:"foreignKey:AiTaskId;references:Id" json:"PqAiTaskLog"`
 }
 
 // TableName 表名:ai_task，AI 任务表。

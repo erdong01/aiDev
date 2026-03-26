@@ -35,6 +35,8 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
             end
 
             local headers = ngx.req.get_headers()
+            local authorization_header = headers[\"authorization\"] or headers[\"Authorization\"]
+            local api_key_header = headers[\"apikey\"] or headers[\"x-api-key\"] or headers[\"X-API-Key\"]
             core.log.warn(
                 \"[aidev-video-debug] rewrite 进入, content_type=\",
                 headers[\"content-type\"] or \"nil\",
@@ -79,8 +81,15 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
                 preview_payload(req_body, 600)
             )
 
-            ctx.cached_authorization = ngx.var.http_authorization
+            ctx.cached_authorization = authorization_header
+            ctx.cached_apikey = api_key_header
             ctx.cached_consumer_name = ctx.consumer_name or \"unknown\"
+            core.log.warn(
+                \"[aidev-video-debug] rewrite 认证头缓存, has_authorization=\",
+                tostring(authorization_header ~= nil and authorization_header ~= \"\"),
+                \", has_apikey=\",
+                tostring(api_key_header ~= nil and api_key_header ~= \"\")
+            )
         end"
       ]
     },
@@ -123,7 +132,8 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
             local req_body = ctx.cached_req_body or ngx.encode_base64(\"{}\")
             local req_body_base64 = ctx.cached_req_body_base64 == true
 
-            local volc_key = ctx.cached_authorization
+            local authorization_header = ctx.cached_authorization
+            local api_key_header = ctx.cached_apikey
             local consumer_name = ctx.cached_consumer_name or \"unknown\"
             local response_status = ngx.status
 
@@ -146,7 +156,9 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
                 local callback_body = core.json.encode({
                     request = {
                         headers = {
-                            authorization = volc_key
+                            authorization = authorization_header,
+                            apikey = api_key_header,
+                            [\"x-api-key\"] = api_key_header
                         },
                         body = req_body,
                         body_base64 = req_body_base64
@@ -166,7 +178,9 @@ curl "http://127.0.0.1:9180/apisix/admin/routes/ai-proxy" \
                     body = callback_body,
                     headers = {
                         [\"Content-Type\"] = \"application/json\",
-                        [\"Authorization\"] = volc_key,
+                        [\"Authorization\"] = authorization_header,
+                        [\"Apikey\"] = api_key_header,
+                        [\"X-API-Key\"] = api_key_header,
                         [\"X-Consumer-Name\"] = consumer_name
                     }
                 })

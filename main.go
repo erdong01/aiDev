@@ -123,15 +123,26 @@ func main() {
 
 		// 5. 完美入库
 		if taskID != "" {
-			authHeader := logItem.Request.Headers["authorization"]
-			pureKey := strings.TrimPrefix(authHeader, "Bearer ")
 			consumerName := logItem.Consumer.Username
+			pureKey := extractTaskKey(logItem.Request.Headers, c)
+
+			if pureKey == "" {
+				log.Printf(
+					"任务入库未获取到 key: taskID=%s, consumer=%s, has_authorization=%t, has_apikey=%t, has_x_api_key=%t",
+					taskID,
+					consumerName,
+					logItem.Request.Headers["authorization"] != "" || c.GetHeader("Authorization") != "",
+					logItem.Request.Headers["apikey"] != "" || c.GetHeader("Apikey") != "",
+					logItem.Request.Headers["x-api-key"] != "" || c.GetHeader("X-API-Key") != "",
+				)
+			}
+			var apiKeyData model.PqApiKey
+			db.DB.Unscoped().Where("user_key = ?", pureKey).First(&apiKeyData)
 
 			aiTask := model.AiTask{
 				GenerateTaskId: taskID,
-				Key:            pureKey,
+				Key:            apiKeyData.Key,
 			}
-
 			err := db.DB.Create(&aiTask).Error
 
 			if err != nil {
@@ -161,4 +172,40 @@ func main() {
 		c.Status(200)
 	})
 	router.Run() // listens on 0.0.0.0:8080 by default
+}
+
+func extractTaskKey(headers map[string]string, c *gin.Context) string {
+	candidates := []string{
+		headers["authorization"],
+		headers["Authorization"],
+		headers["apikey"],
+		headers["Apikey"],
+		headers["x-api-key"],
+		headers["X-API-Key"],
+		c.GetHeader("Authorization"),
+		c.GetHeader("Apikey"),
+		c.GetHeader("X-API-Key"),
+	}
+
+	for _, candidate := range candidates {
+		if key := normalizeTaskKey(candidate); key != "" {
+			return key
+		}
+	}
+
+	return ""
+}
+
+func normalizeTaskKey(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	parts := strings.Fields(trimmed)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		return parts[1]
+	}
+
+	return trimmed
 }
