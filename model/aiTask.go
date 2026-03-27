@@ -31,3 +31,26 @@ type AiTask struct {
 func (*AiTask) TableName() string {
 	return "pq_ai_task"
 }
+
+type VideoGenerateRequest struct {
+	Model         string    `json:"model"`          // 模型版本，例如: ep-20260326131643-jgvtf
+	Ratio         string    `json:"ratio"`          // 视频画幅比例，例如: 9:16
+	Content       []Content `json:"content"`        // 多态内容数组(文本分镜、参考图等)
+	Duration      int       `json:"duration"`       // 生成时长(秒)
+	Resolution    string    `json:"resolution"`     // 分辨率，例如: 480p
+	GenerateAudio bool      `json:"generate_audio"` // 是否生成音频
+}
+
+// Content 多态内容项
+// 💡 工程师提示：由于数组内元素结构不同，非通用字段需加上 omitempty，结构体尽量用指针
+type Content struct {
+	Type     string    `json:"type"`                // 类型: text 或 image_url (通用必填)
+	Text     string    `json:"text,omitempty"`      // 文本内容 (仅当 type="text" 时存在)
+	Role     string    `json:"role,omitempty"`      // 角色设定 (如 reference_image)
+	ImageURL *ImageURL `json:"image_url,omitempty"` // 图片链接结构 (指针类型，仅当 type="image_url" 时存在)
+}
+
+// ImageURL 图片链接结构
+type ImageURL struct {
+	URL string `json:"url"` // 资产路径或公网图片URL
+}
