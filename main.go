@@ -152,6 +152,7 @@ func main() {
 				GenerateTaskId: taskID,
 				Key:            apiKeyData.Key,
 				ModelId:        &aiModel.Id,
+				UserId:         &apiKeyData.UserId,
 			}
 			err := db.DB.Create(&aiTask).Error
 
