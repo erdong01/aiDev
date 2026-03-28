@@ -123,8 +123,7 @@ func main() {
 
 		// 5. 完美入库
 		if taskID != "" {
-			var req model.VideoGenerateRequest
-			json.Unmarshal(decodedReqBody, req)
+
 			consumerName := logItem.Consumer.Username
 			pureKey := extractTaskKey(logItem.Request.Headers, c)
 
@@ -140,8 +139,14 @@ func main() {
 			}
 			var apiKeyData model.PqApiKey
 			db.DB.Unscoped().Where("user_key = ?", pureKey).First(&apiKeyData)
+
+			var req model.VideoGenerateRequest
+			unmarshalErr := json.Unmarshal(decodedReqBody, &req)
+
 			var aiModel model.PqAiModel
-			db.DB.Unscoped().Where("name = ?", req.Model).First(&aiModel)
+			if unmarshalErr == nil {
+				db.DB.Unscoped().Where("name = ?", req.Model).First(&aiModel)
+			}
 
 			aiTask := model.AiTask{
 				GenerateTaskId: taskID,
