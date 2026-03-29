@@ -145,7 +145,7 @@ func main() {
 
 			var aiModel model.PqAiModel
 			if unmarshalErr == nil {
-				db.DB.Unscoped().Where("name = ?", req.Model).First(&aiModel)
+				db.DB.Unscoped().Where("name = ?", req.Model).Order("id DESC").First(&aiModel)
 			}
 
 			aiTask := model.AiTask{

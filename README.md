@@ -1,8 +1,8 @@
-docker build --platform linux/amd64 -t registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.28 .
+docker build --platform linux/amd64 -t registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.29 .
 
-docker push registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.28
+docker push registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.29
 
-docker pull registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.28
+docker pull registry.cn-hangzhou.aliyuncs.com/panqu/aidev:1.0.29
 
 docker stop aidev
 
